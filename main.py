@@ -2,9 +2,11 @@
 import datetime
 import math
 import statistics
+import textwrap
 import typing
 from collections.abc import Callable
 from pathlib import Path
+from statistics import StatisticsError
 from typing import Annotated, NamedTuple, get_args
 
 import click
@@ -121,6 +123,7 @@ def calculate_overtime_sell(wanted_credits: int, quota_amount: int) -> int:
 WeatherTypesLiteral = typing.Literal[
     "clear", "stormy", "rainy", "flooded", "eclipsed", "foggy"
 ]
+
 WeatherTypes = Annotated[
     str,
     typer.Option(
@@ -246,6 +249,7 @@ class Run(pydantic.BaseModel):
     quotas: list[Quota]
     run_title: str = ""
     run_type: RunTypes = "hq"
+    wiped: bool = False
 
     @staticmethod
     def get_run_file() -> Path:
@@ -414,9 +418,10 @@ class Run(pydantic.BaseModel):
             exclude_defaults=True, exclude_none=True, exclude_unset=True
         )
         quota = quota.model_validate({**base, **new_data})
-        quota.r_value, quota.roll = quota.calculate_r_value_and_roll(
-            self.quotas[-2].amount
-        )
+        if quota.number != 1:
+            quota.r_value, quota.roll = quota.calculate_r_value_and_roll(
+                self.quotas[-2].amount
+            )
         self.quotas[-1] = quota
 
     def add_day(self, day: Day) -> None:
@@ -468,11 +473,14 @@ app = pydantic_typer.Typer()
 
 
 @app.command(help="Lets you pick a previous run to be your current run")
-def set_current_run():
+def set_current_run(include_wipes: Annotated[bool, typer.Option(help="Whether or not to include wipes in the selection")] = False):
     runs = []
     for run_file in run_directory.glob("run*.yaml"):
         try:
-            runs.append(pydantic_yaml.parse_yaml_file_as(Run, run_file))
+            run = pydantic_yaml.parse_yaml_file_as(Run, run_file)
+            if not include_wipes and run.wiped:
+                continue
+            runs.append(run)
         except pydantic.ValidationError:
             continue
     titles_and_dates = {
@@ -495,6 +503,7 @@ def start_run(
     run_title: Annotated[
         str, typer.Option(help="The title for the run, to be used for future selection")
     ] = "",
+    run_type: Annotated[str, typer.Option(help="The type of run", click_type=click.Choice(["hq", "smhq"]))] = "hq",
 ):
     run_directory.mkdir(parents=True, exist_ok=True)
     run_date = datetime.datetime.now().astimezone().replace(microsecond=0)
@@ -503,10 +512,30 @@ def start_run(
         quotas=[Quota(days=[], amount=130, sold=0, roll=spooky_guoda_number, number=1)],
         run_title=run_title,
         run_date=run_date,
+        run_type=run_type,
     )
     pydantic_yaml.to_yaml_file(new_run_file, new_run)
     current_run = CurrentRun(current_run=new_run_file)
     pydantic_yaml.to_yaml_file(current_run_file, current_run)
+
+
+@app.command(help="Updates the currently selected run")
+def update_run(
+        run_title: Annotated[
+        str, typer.Option(help="The title for the run, to be used for future selection")
+    ] = "",
+    run_type: Annotated[str, typer.Option(help="The type of run", click_type=click.Choice(["hq", "smhq", ""]))] = "",
+        wiped: Annotated[bool | None, typer.Option(help="Whether or not the run has wiped")] = None,
+):
+    run = Run.get_run()
+    if run_title:
+        run.run_title = run_title
+    if run_type:
+        run.run_type = run_type
+    if wiped is not None:
+        run.wiped = wiped
+    run.write_run()
+
 
 
 @flatten_args
@@ -588,9 +617,11 @@ def average(
     ] = 1,
 ):
     fromq = max(fromq, 1)
-    fromq -= 1
     run = Run.get_run()
-    print(run.get_average_top_line(fromq))
+    try:
+        print(run.get_average_top_line(fromq))
+    except StatisticsError:
+        print("N/A")
 
 
 @app.command(help="Shows the currently selected run")
@@ -610,7 +641,10 @@ def average_efficiency(
     fromq = max(fromq, 1)
     fromq -= 1
     run = Run.get_run()
-    print(f"{round(run.efficiency * 100, 2)}%")
+    try:
+        print(f"{round(run.efficiency * 100, 2)}%")
+    except StatisticsError:
+        print("N/A")
 
 
 @app.command(help="Shows how much loot is currently on ship")
@@ -622,7 +656,10 @@ def on_ship():
 @app.command("pace", help="Shows the pace the run is projected to be on")
 def get_pace():
     run = Run.get_run()
-    print(run.pace)
+    try:
+        print(run.pace)
+    except StatisticsError:
+        print("N/A")
 
 
 @app.command(help="Shows how much loot has been collected in total")
@@ -659,7 +696,13 @@ def calculate_overtime(
     run = Run.get_run()
     if quota is None:
         quota = run.current_quota_amount
-    print(calculate_overtime_sell(desired_amount, quota))
+    sell_amount = calculate_overtime_sell(desired_amount, quota)
+    print(
+        textwrap.dedent(f"""
+    Sell:     {sell_amount}
+    OT bonus: {desired_amount - sell_amount}
+    """).strip()
+    )
 
 
 if __name__ == "__main__":
