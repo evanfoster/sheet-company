@@ -2,6 +2,7 @@
 import datetime
 import math
 import statistics
+import sys
 import textwrap
 import typing
 from collections.abc import Callable
@@ -245,11 +246,17 @@ class Quota(pydantic.BaseModel):
 
 
 class Run(pydantic.BaseModel):
-    run_date: datetime.datetime
-    quotas: list[Quota]
+    quotas: list[Quota] = pydantic.Field(
+        default_factory=lambda: [
+            Quota(days=[], amount=130, sold=0, roll=spooky_guoda_number, number=1)
+        ]
+    )
+    run_date: datetime.datetime = pydantic.Field(default_factory=datetime.datetime.now)
     run_title: str = ""
     run_type: RunTypes = "hq"
     wiped: bool = False
+    version: str = "v73"
+    players: set[str] = pydantic.Field(default_factory=set)
 
     @staticmethod
     def get_run_file() -> Path:
@@ -351,6 +358,9 @@ class Run(pydantic.BaseModel):
         return max_quota_amount
 
     def project_quotas(self, quota_number: int) -> list[Quota]:
+        """
+        Use spooky Maku magic to predict the future oooooOOoooo
+        """
         if len(self.quotas) >= quota_number:
             return self.quotas.copy()
         # Time to be spooky and predict the future
@@ -473,7 +483,11 @@ app = pydantic_typer.Typer()
 
 
 @app.command(help="Lets you pick a previous run to be your current run")
-def set_current_run(include_wipes: Annotated[bool, typer.Option(help="Whether or not to include wipes in the selection")] = False):
+def set_current_run(
+    include_wipes: Annotated[
+        bool, typer.Option(help="Whether or not to include wipes in the selection")
+    ] = False,
+):
     runs = []
     for run_file in run_directory.glob("run*.yaml"):
         try:
@@ -484,15 +498,17 @@ def set_current_run(include_wipes: Annotated[bool, typer.Option(help="Whether or
         except pydantic.ValidationError:
             continue
     titles_and_dates = {
-        f"{run.run_title}|{run.run_date}|Quota {run.current_quota_number}—{run.current_quota_amount}|On ship: {run.on_ship}": run
+        f"{run.run_date}|{run.version}|{', '.join(run.players)}|{run.run_title}|Quota {run.current_quota_number}—{run.current_quota_amount}|On ship: {run.on_ship}": run
         for run in runs
     }
     selection = iterfzf.iterfzf(titles_and_dates.keys())
     selected_run = titles_and_dates.get(selection)
     if selected_run is None:
-        raise RuntimeError(
-            f"Selected run {selection} somehow doesn't exist. Weep in fear and terror."
+        print(
+            f"Selected run {selection} somehow doesn't exist. Weep in fear and terror.",
+            file=sys.stderr,
         )
+        raise typer.Abort()
     run_file = run_directory / f"run-{selected_run.run_date.isoformat()}.yaml"
     current_run = CurrentRun(current_run=run_file)
     pydantic_yaml.to_yaml_file(current_run_file, current_run)
@@ -503,8 +519,20 @@ def start_run(
     run_title: Annotated[
         str, typer.Option(help="The title for the run, to be used for future selection")
     ] = "",
-    run_type: Annotated[str, typer.Option(help="The type of run", click_type=click.Choice(["hq", "smhq"]))] = "hq",
+    run_type: Annotated[
+        str,
+        typer.Option(help="The type of run", click_type=click.Choice(["hq", "smhq"])),
+    ] = "hq",
+    version: Annotated[
+        str, typer.Option(help="The version of Lethal Company being played")
+    ] = "v73",
+    players: Annotated[
+        list[str] | None, typer.Option(help="The players in the current run")
+    ] = None,
 ):
+    if not players:
+        print("No players set for run.", file=sys.stderr)
+        raise typer.Abort()
     run_directory.mkdir(parents=True, exist_ok=True)
     run_date = datetime.datetime.now().astimezone().replace(microsecond=0)
     new_run_file = run_directory / f"run-{run_date.isoformat()}.yaml"
@@ -513,6 +541,8 @@ def start_run(
         run_title=run_title,
         run_date=run_date,
         run_type=run_type,
+        version=version,
+        players=set(players),
     )
     pydantic_yaml.to_yaml_file(new_run_file, new_run)
     current_run = CurrentRun(current_run=new_run_file)
@@ -521,11 +551,18 @@ def start_run(
 
 @app.command(help="Updates the currently selected run")
 def update_run(
-        run_title: Annotated[
+    run_title: Annotated[
         str, typer.Option(help="The title for the run, to be used for future selection")
     ] = "",
-    run_type: Annotated[str, typer.Option(help="The type of run", click_type=click.Choice(["hq", "smhq", ""]))] = "",
-        wiped: Annotated[bool | None, typer.Option(help="Whether or not the run has wiped")] = None,
+    run_type: Annotated[
+        str,
+        typer.Option(
+            help="The type of run", click_type=click.Choice(["hq", "smhq", ""])
+        ),
+    ] = "",
+    wiped: Annotated[
+        bool | None, typer.Option(help="Whether or not the run has wiped")
+    ] = None,
 ):
     run = Run.get_run()
     if run_title:
@@ -535,7 +572,6 @@ def update_run(
     if wiped is not None:
         run.wiped = wiped
     run.write_run()
-
 
 
 @flatten_args
@@ -657,7 +693,10 @@ def on_ship():
 def get_pace():
     run = Run.get_run()
     try:
-        print(run.pace)
+        if run.wiped:
+            print("wiped")
+        else:
+            print(run.pace)
     except StatisticsError:
         print("N/A")
 
@@ -677,7 +716,8 @@ def total_collected(
         return
     quota = max(quota, 1) - 1
     if not len(run.quotas) > quota:
-        raise RuntimeError(f"Quota {quota + 1} has not been reached yet.")
+        print(f"Quota {quota + 1} has not been reached yet.", file=sys.stderr)
+        raise typer.Abort()
     print(run.quotas[quota].total_collected)
 
 
