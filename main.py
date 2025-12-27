@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import copy
 import datetime
 import math
 import statistics
@@ -257,6 +258,7 @@ class Run(pydantic.BaseModel):
     wiped: bool = False
     version: str = "v73"
     players: set[str] = pydantic.Field(default_factory=set)
+    target_quota: int = 21
 
     @staticmethod
     def get_run_file() -> Path:
@@ -289,8 +291,12 @@ class Run(pydantic.BaseModel):
         return sum((quota.total_collected for quota in self.quotas))
 
     @property
+    def sum_total_sold(self) -> int:
+        return sum((quota.sold for quota in self.quotas))
+
+    @property
     def day_count(self) -> int:
-        return sum((quota.days_played for quota in self.quotas)) + 1
+        return sum((quota.days_played for quota in self.quotas))
 
     @property
     def current_quota_amount(self) -> int:
@@ -298,7 +304,7 @@ class Run(pydantic.BaseModel):
 
     @property
     def efficiency(self) -> float:
-        if self.day_count - 1 == 0:
+        if self.day_count == 0:
             return float("NaN")
         return self.get_average_top_line(1) / self.get_average_bottom_line(1)
 
@@ -325,8 +331,8 @@ class Run(pydantic.BaseModel):
         return int(round(statistics.mean(bottom_lines), 0))
 
     @property
-    def pace(self) -> int:
-        quotas = self.project_quotas(25)
+    def pace(self, max_quota=30) -> int:
+        quotas = self.project_quotas(max_quota)
         projected_on_ship_amounts = [quotas[0].total_collected]
         if self.current_quota_number == 1:
             return quotas[0].total_collected
@@ -357,14 +363,22 @@ class Run(pydantic.BaseModel):
                 return quota.amount
         return max_quota_amount
 
+    @property
+    def needed_average(self) -> int:
+        quotas = self.project_quotas(self.target_quota)
+        amount_needed = sum((quota.sold for quota in quotas)) - self.sum_total_collected
+        if amount_needed < 0:
+            return 0
+        return math.ceil(amount_needed / (self.target_quota * 3 - self.day_count))
+
     def project_quotas(self, quota_number: int) -> list[Quota]:
         """
         Use spooky Maku magic to predict the future oooooOOoooo
         """
         if len(self.quotas) >= quota_number:
-            return self.quotas.copy()
+            return copy.deepcopy(self.quotas)
         # Time to be spooky and predict the future
-        quotas = self.quotas.copy()
+        quotas = copy.deepcopy(self.quotas)
         last_quota = quotas[-1]
         fromq = 1
         if self.run_type == "hq":
@@ -529,6 +543,9 @@ def start_run(
     players: Annotated[
         list[str] | None, typer.Option(help="The players in the current run")
     ] = None,
+    target_quota: Annotated[
+        int, typer.Option(help="The quota the current run is targeting")
+    ] = 21,
 ):
     if not players:
         print("No players set for run.", file=sys.stderr)
@@ -543,6 +560,7 @@ def start_run(
         run_type=run_type,
         version=version,
         players=set(players),
+        target_quota=target_quota,
     )
     pydantic_yaml.to_yaml_file(new_run_file, new_run)
     current_run = CurrentRun(current_run=new_run_file)
@@ -560,6 +578,15 @@ def update_run(
             help="The type of run", click_type=click.Choice(["hq", "smhq", ""])
         ),
     ] = "",
+    version: Annotated[
+        str, typer.Option(help="The version of Lethal Company being played")
+    ] = "",
+    players: Annotated[
+        list[str] | None, typer.Option(help="The players in the current run")
+    ] = None,
+    target_quota: Annotated[
+        int | None, typer.Option(help="The quota the current run is targeting")
+    ] = None,
     wiped: Annotated[
         bool | None, typer.Option(help="Whether or not the run has wiped")
     ] = None,
@@ -569,6 +596,12 @@ def update_run(
         run.run_title = run_title
     if run_type:
         run.run_type = run_type
+    if version:
+        run.version = version
+    if players:
+        run.players = set(players)
+    if target_quota is not None:
+        run.target_quota = target_quota
     if wiped is not None:
         run.wiped = wiped
     run.write_run()
@@ -720,6 +753,16 @@ def total_collected(
         raise typer.Abort()
     print(run.quotas[quota].total_collected)
 
+
+@app.command(help="Shows the average needed to meet the target quota")
+def needed_average():
+    run = Run.get_run()
+    print(run.needed_average)
+
+@app.command(help="Shows the desired target quota")
+def target_quota():
+    run = Run.get_run()
+    print(run.target_quota)
 
 @app.command(help="Shows how much loot has been collected in total")
 def calculate_overtime(
