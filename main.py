@@ -2,6 +2,7 @@
 import copy
 import datetime
 import math
+import random
 import statistics
 import sys
 import textwrap
@@ -116,10 +117,62 @@ def reverse_quota_curve(
     return min(max(0.0001, roll), 0.9999)
 
 
+def calculate_quota_curve(r_value: float) -> float:
+    if r_value <= 0.1172:
+        return (
+            (120.0163409 * r_value - 50.5378659) * r_value + 7.4554
+        ) * r_value - 0.503
+    elif r_value <= 0.8804:
+        return (
+            (0.57326727 * r_value - 0.8792601) * r_value + 0.73737564
+        ) * r_value - 0.20546592
+    else:
+        return (
+            (120.77228959 * r_value - 313.35391533) * r_value + 271.4424619
+        ) * r_value - 78.35783615
+
+
+def increment_quota(quota_number: int, r_value: float) -> int:
+    return math.floor(
+        100
+        * (1 + quota_number * quota_number / 16)
+        * (1 + calculate_quota_curve(r_value))
+    )
+
+
 def calculate_overtime_sell(wanted_credits: int, quota_amount: int) -> int:
     if quota_amount < wanted_credits - 75:
-        return math.ceil(((5 * wanted_credits) + quota_amount + 75) / 6)
+        return math.floor(((5 * wanted_credits) + 75 + quota_amount + 5) / 6)
     return max(wanted_credits, quota_amount)
+
+
+def calculate_quota_chance(
+    wanted_credits: int,
+    target_quota_amount: int,
+    current_quota_amount: int,
+    current_quota_number: int,
+    current_ship_loot: int,
+    current_average: int,
+    quota_days_played: int,
+) -> float:
+    iterations: int = int(1e5)
+    successful_iterations: int = 0
+    for i in range(iterations):
+        total: int = 0
+        previous_quota_amount: int = -1
+        quota_amount = current_quota_amount
+        quota_number = current_quota_number
+        days_to_play = 0 - quota_days_played
+        while current_ship_loot + current_average * days_to_play >= total:
+            total += calculate_overtime_sell(wanted_credits, quota_amount)
+            previous_quota_amount = quota_amount
+            quota_amount += increment_quota(quota_number, random.random())
+            quota_number += 1
+            days_to_play += 3
+        if previous_quota_amount >= target_quota_amount:
+            successful_iterations += 1
+
+    return successful_iterations / iterations
 
 
 WeatherTypesLiteral = typing.Literal[
@@ -336,10 +389,7 @@ class Run(pydantic.BaseModel):
         projected_on_ship_amounts = [quotas[0].total_collected]
         if self.current_quota_number == 1:
             return quotas[0].total_collected
-        fromq = 1
-        if self.run_type == "hq":
-            fromq = 2
-        pace_average = self.get_average_top_line(fromq, quotas)
+        pace_average = self.get_average_top_line(self.fromq, quotas)
         previous_sold = quotas[0].sold
         max_quota_amount = quotas[0].amount
         amount_on_ship = quotas[0].on_ship
@@ -371,6 +421,12 @@ class Run(pydantic.BaseModel):
             return 0
         return math.ceil(amount_needed / (self.target_quota * 3 - self.day_count))
 
+    @property
+    def fromq(self) -> int:
+        if self.run_type == "hq":
+            return 2
+        return 1
+
     def project_quotas(self, quota_number: int) -> list[Quota]:
         """
         Use spooky Maku magic to predict the future oooooOOoooo
@@ -380,11 +436,8 @@ class Run(pydantic.BaseModel):
         # Time to be spooky and predict the future
         quotas = copy.deepcopy(self.quotas)
         last_quota = quotas[-1]
-        fromq = 1
-        if self.run_type == "hq":
-            fromq = 2
-        average_top_line = self.get_average_top_line(fromq)
-        average_bottom_line = self.get_average_bottom_line(fromq)
+        average_top_line = self.get_average_top_line(self.fromq)
+        average_bottom_line = self.get_average_bottom_line(self.fromq)
         if last_quota.sold == 0:
             last_quota.sold = calculate_overtime_sell(1500, last_quota.amount)
         if len(last_quota.days) < 3:
@@ -484,6 +537,22 @@ class Run(pydantic.BaseModel):
 
     def write_run(self):
         pydantic_yaml.to_yaml_file(self.get_run_file(), self)
+
+    def quota_chance(
+        self, target_quota_amount: int, wanted_credits: int = 1500
+    ) -> float:
+        """
+        def calculate_quota_chance(wanted_credits: int, target_quota_amount: int, current_quota_amount: int, current_quota_number: int, current_ship_loot: int, current_average: int, quota_days_played: int) -> float:
+        """
+        return calculate_quota_chance(
+            wanted_credits,
+            target_quota_amount,
+            self.current_quota_amount,
+            self.current_quota_number,
+            self.on_ship,
+            self.get_average_top_line(self.fromq),
+            self.quotas[-1].days_played,
+        )
 
 
 class CurrentRun(pydantic.BaseModel):
@@ -759,10 +828,12 @@ def needed_average():
     run = Run.get_run()
     print(run.needed_average)
 
+
 @app.command(help="Shows the desired target quota")
 def target_quota():
     run = Run.get_run()
     print(run.target_quota)
+
 
 @app.command(help="Shows how much loot has been collected in total")
 def calculate_overtime(
@@ -786,6 +857,20 @@ def calculate_overtime(
     OT bonus: {desired_amount - sell_amount}
     """).strip()
     )
+
+
+@app.command(help="Shows the chance of reaching a given quota amount")
+def chance(
+    target: Annotated[int, typer.Argument(help="The amount you want to reach")],
+    base_sell: Annotated[
+        int, typer.Option(help="The minimum amount you need to sell each quota")
+    ] = 1500,
+    round_place: Annotated[
+        int, typer.Option(help="The number of places you want to round to")
+    ] = 2,
+):
+    run = Run.get_run()
+    print(f"{round(run.quota_chance(target, base_sell) * 100, round_place)}%")
 
 
 if __name__ == "__main__":
