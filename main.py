@@ -388,6 +388,7 @@ class Run(pydantic.BaseModel):
     @property
     def pace(self, max_quota=30) -> tuple[int, int]:
         quotas = self.project_quotas(max_quota)
+        # The predicted amount of money on ship for each quota
         projected_on_ship_amounts = [quotas[0].total_collected]
         if self.current_quota_number == 1:
             return quotas[0].total_collected, 1
@@ -435,10 +436,9 @@ class Run(pydantic.BaseModel):
         """
         Use spooky Maku magic to predict the future oooooOOoooo
         """
-        if len(self.quotas) >= quota_number:
-            return copy.deepcopy(self.quotas)
-        # Time to be spooky and predict the future
         quotas = copy.deepcopy(self.quotas)
+        if len(self.quotas) >= quota_number:
+            return quotas
         last_quota = quotas[-1]
         average_top_line = self.get_average_top_line(self.fromq)
         average_bottom_line = self.get_average_bottom_line(self.fromq)
@@ -556,6 +556,7 @@ class Run(pydantic.BaseModel):
         )
 
     def printable(self) -> str:
+        """Too lazy to deal with altering pydantic repr (assuming it's not just def __repr__(self):), so we're just doing this."""
         return f"{self.run_date}|{self.version}|{', '.join(self.players)}|{self.run_title}|Quota {self.current_quota_number}—{self.current_quota_amount}|On ship: {self.on_ship}"
 
 
