@@ -117,7 +117,11 @@ def reverse_quota_curve(
     return min(max(0.0001, roll), 0.9999)
 
 
-def calculate_quota_curve(r_value: float) -> float:
+def quota_curve(r_value: float) -> float:
+    """
+    Generates a quota curve for a given r value. We only use this when calculating the chance we'll reach
+    a particular quota amount, since pace calculations want to use the absolute midroll in all cases.
+    """
     if r_value <= 0.1172:
         return (
             (120.0163409 * r_value - 50.5378659) * r_value + 7.4554
@@ -134,9 +138,7 @@ def calculate_quota_curve(r_value: float) -> float:
 
 def increment_quota(quota_number: int, r_value: float) -> int:
     return math.floor(
-        100
-        * (1 + quota_number * quota_number / 16)
-        * (1 + calculate_quota_curve(r_value))
+        100 * (1 + quota_number * quota_number / 16) * (1 + quota_curve(r_value))
     )
 
 
@@ -280,16 +282,16 @@ class Quota(pydantic.BaseModel):
     @property
     def next_quota_roll_range(self) -> QuotaRollRange:
         # The spooky magic numbers here were nabbed from Maku's glorious spreadsheet.
-        minimum = (
+        minimum_roll = (
             math.floor((100 * (1 + (self.number**2) / 16) * (1 - 0.503))) + self.amount
         )
-        average = (
+        average_roll = (
             math.floor((100 * (1 + (self.number**2) / 16) * 1.015244)) + self.amount
         )
-        maximum = (
+        maximum_roll = (
             math.floor((100 * (1 + (self.number**2) / 16) * (1 + 0.503))) + self.amount
         )
-        return QuotaRollRange(minimum, average, maximum)
+        return QuotaRollRange(minimum_roll, average_roll, maximum_roll)
 
     def calculate_r_value_and_roll(self, previous_amount) -> tuple[float, float]:
         r_value = (
@@ -384,14 +386,15 @@ class Run(pydantic.BaseModel):
         return int(round(statistics.mean(bottom_lines), 0))
 
     @property
-    def pace(self, max_quota=30) -> int:
+    def pace(self, max_quota=30) -> tuple[int, int]:
         quotas = self.project_quotas(max_quota)
         projected_on_ship_amounts = [quotas[0].total_collected]
         if self.current_quota_number == 1:
-            return quotas[0].total_collected
+            return quotas[0].total_collected, 1
         pace_average = self.get_average_top_line(self.fromq, quotas)
         previous_sold = quotas[0].sold
         max_quota_amount = quotas[0].amount
+        max_quota_number = 1
         amount_on_ship = quotas[0].on_ship
         for quota in quotas[1:]:
             amount_on_ship += quota.total_collected
@@ -409,9 +412,10 @@ class Run(pydantic.BaseModel):
                 projected_on_ship_amounts.append(projected_on_ship)
                 previous_sold = quota.sold
                 max_quota_amount = quota.amount
+                max_quota_number = quota.number
             else:
-                return quota.amount
-        return max_quota_amount
+                return quota.amount, quota.number
+        return max_quota_amount, max_quota_number
 
     @property
     def needed_average(self) -> int:
@@ -541,9 +545,6 @@ class Run(pydantic.BaseModel):
     def quota_chance(
         self, target_quota_amount: int, wanted_credits: int = 1500
     ) -> float:
-        """
-        def calculate_quota_chance(wanted_credits: int, target_quota_amount: int, current_quota_amount: int, current_quota_number: int, current_ship_loot: int, current_average: int, quota_days_played: int) -> float:
-        """
         return calculate_quota_chance(
             wanted_credits,
             target_quota_amount,
@@ -553,6 +554,9 @@ class Run(pydantic.BaseModel):
             self.get_average_top_line(self.fromq),
             self.quotas[-1].days_played,
         )
+
+    def printable(self) -> str:
+        return f"{self.run_date}|{self.version}|{', '.join(self.players)}|{self.run_title}|Quota {self.current_quota_number}—{self.current_quota_amount}|On ship: {self.on_ship}"
 
 
 class CurrentRun(pydantic.BaseModel):
@@ -580,10 +584,7 @@ def set_current_run(
             runs.append(run)
         except pydantic.ValidationError:
             continue
-    titles_and_dates = {
-        f"{run.run_date}|{run.version}|{', '.join(run.players)}|{run.run_title}|Quota {run.current_quota_number}—{run.current_quota_amount}|On ship: {run.on_ship}": run
-        for run in runs
-    }
+    titles_and_dates = {run.printable(): run for run in runs}
     selection = iterfzf.iterfzf(titles_and_dates.keys())
     selected_run = titles_and_dates.get(selection)
     if selected_run is None:
@@ -612,8 +613,9 @@ def start_run(
     players: Annotated[
         list[str] | None, typer.Option(help="The players in the current run")
     ] = None,
-    target_quota: Annotated[
-        int, typer.Option(help="The quota the current run is targeting")
+    target_quota_amount: Annotated[
+        int,
+        typer.Option("--target-quota", help="The quota the current run is targeting"),
     ] = 21,
 ):
     if not players:
@@ -629,7 +631,7 @@ def start_run(
         run_type=run_type,
         version=version,
         players=set(players),
-        target_quota=target_quota,
+        target_quota=target_quota_amount,
     )
     pydantic_yaml.to_yaml_file(new_run_file, new_run)
     current_run = CurrentRun(current_run=new_run_file)
@@ -653,8 +655,9 @@ def update_run(
     players: Annotated[
         list[str] | None, typer.Option(help="The players in the current run")
     ] = None,
-    target_quota: Annotated[
-        int | None, typer.Option(help="The quota the current run is targeting")
+    target_quota_amount: Annotated[
+        int | None,
+        typer.Option("--target-quota", help="The quota the current run is targeting"),
     ] = None,
     wiped: Annotated[
         bool | None, typer.Option(help="Whether or not the run has wiped")
@@ -669,8 +672,8 @@ def update_run(
         run.version = version
     if players:
         run.players = set(players)
-    if target_quota is not None:
-        run.target_quota = target_quota
+    if target_quota_amount is not None:
+        run.target_quota = target_quota_amount
     if wiped is not None:
         run.wiped = wiped
     run.write_run()
@@ -765,9 +768,7 @@ def average(
 @app.command(help="Shows the currently selected run")
 def show_current_run():
     run = Run.get_run()
-    print(
-        f"{run.run_title}|{run.run_date}|Quota {run.current_quota_number}—{run.current_quota_amount}|On ship: {run.on_ship}"
-    )
+    print(run.printable())
 
 
 @app.command(help="Shows the average collection efficiency")
@@ -798,7 +799,8 @@ def get_pace():
         if run.wiped:
             print("wiped")
         else:
-            print(run.pace)
+            quota_amount, quota_number = run.pace
+            print(f"Q{quota_number}: {quota_amount}")
     except StatisticsError:
         print("N/A")
 
