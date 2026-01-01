@@ -617,7 +617,7 @@ def start_run(
     target_quota_amount: Annotated[
         int,
         typer.Option("--target-quota", help="The quota the current run is targeting"),
-    ] = 21,
+    ] = 20,
 ):
     if not players:
         print("No players set for run.", file=sys.stderr)
@@ -763,7 +763,7 @@ def average(
     try:
         print(run.get_average_top_line(fromq))
     except StatisticsError:
-        print("N/A")
+        print("idk")
 
 
 @app.command(help="Shows the currently selected run")
@@ -782,9 +782,12 @@ def average_efficiency(
     fromq -= 1
     run = Run.get_run()
     try:
-        print(f"{round(run.efficiency * 100, 2)}%")
+        if math.isnan(run.efficiency):
+            print("idk")
+        else:
+            print(f"{round(run.efficiency * 100, 2)}%")
     except StatisticsError:
-        print("N/A")
+        print("idk")
 
 
 @app.command(help="Shows how much loot is currently on ship")
@@ -803,7 +806,7 @@ def get_pace():
             quota_amount, quota_number = run.pace
             print(f"Q{quota_number}: {quota_amount}")
     except StatisticsError:
-        print("N/A")
+        print("idk")
 
 
 @app.command(help="Shows how much loot has been collected in total")
@@ -829,7 +832,10 @@ def total_collected(
 @app.command(help="Shows the average needed to meet the target quota")
 def needed_average():
     run = Run.get_run()
-    print(run.needed_average)
+    try:
+        print(run.needed_average)
+    except StatisticsError:
+        print("idk")
 
 
 @app.command(help="Shows the desired target quota")
@@ -873,7 +879,10 @@ def chance(
     ] = 2,
 ):
     run = Run.get_run()
-    print(f"{round(run.quota_chance(target, base_sell) * 100, round_place)}%")
+    try:
+        print(f"{round(run.quota_chance(target, base_sell) * 100, round_place)}%")
+    except StatisticsError:
+        print("idk")
 
 
 if __name__ == "__main__":
