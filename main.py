@@ -434,7 +434,7 @@ class Run(pydantic.BaseModel):
 
     def project_quotas(self, quota_number: int) -> list[Quota]:
         """
-        Use spooky Maku magic to predict the future oooooOOoooo
+        Use spooky Maku magic to predict the future
         """
         quotas = copy.deepcopy(self.quotas)
         if len(self.quotas) >= quota_number:
