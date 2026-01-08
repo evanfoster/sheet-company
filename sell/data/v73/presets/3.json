@@ -1,0 +1,18 @@
+[
+    [0, 0, "Walkie-talkie", 12, 12],
+    [0, 0, "Flashlight", 15, 15],
+    [0, 0, "Shovel", 30, 30],
+    [0, 0, "Lockpicker", 20, 20],
+    [0, 0, "Pro-flashlight", 25, 25],
+    [0, 0, "Stun grenade", 30, 30],
+    [0, 0, "Boombox", 60, 60],
+    [0, 0, "TZP-Inhalant", 80, 80],
+    [0, 0, "Zap gun", 400, 400],
+    [0, 0, "Jetpack", 900, 900],
+    [0, 0, "Extension ladder", 60, 60],
+    [0, 0, "Radar-booster", 60, 60],
+    [0, 0, "Spray paint", 50, 50],
+    [0, 0, "Weed killer", 25, 25],
+    [0, 0, "Belt bag", 45, 45],
+    [0, 0, "Cruiser", 370, 370]
+]

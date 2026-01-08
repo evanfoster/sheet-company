@@ -4,7 +4,7 @@ default: format
 
 lint:
 	ruff check
-	mypy --follow-untyped-imports .
+	mypy --follow-untyped-imports --check-untyped-defs .
 
 fix:
 	ruff check --fix

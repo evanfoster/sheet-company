@@ -18,7 +18,11 @@ import pydantic
 import pydantic_typer
 import pydantic_yaml
 import typer
+import xdg_base_dirs
 from typer.models import OptionInfo
+
+import sell
+from sell.calculator import calculate_overtime_sell
 
 # No idea where 0.51270322870301 comes from, but if Maku thinks it works then so do I.
 spooky_guoda_number = 0.51270322870301
@@ -140,12 +144,6 @@ def increment_quota(quota_number: int, r_value: float) -> int:
     return math.floor(
         100 * (1 + quota_number * quota_number / 16) * (1 + quota_curve(r_value))
     )
-
-
-def calculate_overtime_sell(wanted_credits: int, quota_amount: int) -> int:
-    if quota_amount < wanted_credits - 75:
-        return math.floor(((5 * wanted_credits) + 75 + quota_amount + 5) / 6)
-    return max(wanted_credits, quota_amount)
 
 
 def calculate_quota_chance(
@@ -564,7 +562,7 @@ class CurrentRun(pydantic.BaseModel):
     current_run: Path
 
 
-run_directory = Path("~/.local/state/sheet-company").expanduser()
+run_directory = xdg_base_dirs.xdg_state_home() / "sheet-company"
 current_run_file = run_directory / "current_run.yaml"
 
 app = pydantic_typer.Typer()
@@ -883,6 +881,17 @@ def chance(
         print(f"{round(run.quota_chance(target, base_sell) * 100, round_place)}%")
     except StatisticsError:
         print("idk")
+
+
+@app.command(help="Shows a store interface for quickly calculating sell")
+def store():
+    run = Run.get_run()
+    sold_amount = sell.calculator.run(
+        quota=run.current_quota_amount, moon_amount=1500, version=run.version
+    )
+    if sold_amount is not None:
+        run.update_quota(amount=None, sold=sold_amount)
+        run.write_run()
 
 
 if __name__ == "__main__":
