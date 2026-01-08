@@ -22,6 +22,8 @@ import xdg_base_dirs
 from typer.models import OptionInfo
 
 import sell
+import settings
+import util
 from sell.calculator import calculate_overtime_sell
 
 # No idea where 0.51270322870301 comes from, but if Maku thinks it works then so do I.
@@ -312,6 +314,9 @@ class Run(pydantic.BaseModel):
     version: str = "v73"
     players: set[str] = pydantic.Field(default_factory=set)
     target_quota: int = 21
+    quota_chance_amount: int = 17000
+    write_stream_overlay: bool = False
+    stream_overlay_path: Path = Path("/tmp")
 
     @staticmethod
     def get_run_file() -> Path:
@@ -363,17 +368,20 @@ class Run(pydantic.BaseModel):
 
     def get_average_top_line(
         self, fromq: int, quotas: list[Quota] | None = None
-    ) -> int:
+    ) -> int | float:
         if quotas is None:
             quotas = self.quotas
         fromq = max(fromq, 1)
         fromq -= 1
         top_lines = [day.top_line for quota in quotas[fromq:] for day in quota.days]
-        return int(round(statistics.mean(top_lines), 0))
+        try:
+            return int(round(statistics.mean(top_lines), 0))
+        except statistics.StatisticsError:
+            return float("NaN")
 
     def get_average_bottom_line(
         self, fromq: int, quotas: list[Quota] | None = None
-    ) -> int:
+    ) -> int | float:
         if quotas is None:
             quotas = self.quotas
         fromq = max(fromq, 1)
@@ -381,12 +389,17 @@ class Run(pydantic.BaseModel):
         bottom_lines = [
             day.bottom_line for quota in quotas[fromq:] for day in quota.days
         ]
-        return int(round(statistics.mean(bottom_lines), 0))
+        try:
+            return int(round(statistics.mean(bottom_lines), 0))
+        except statistics.StatisticsError:
+            return float("NaN")
 
     @property
     def pace(self, max_quota=30) -> tuple[int, int]:
         quotas = self.project_quotas(max_quota)
         # The predicted amount of money on ship for each quota
+        if not quotas:
+            return 130, 1
         projected_on_ship_amounts = [quotas[0].total_collected]
         if self.current_quota_number == 1:
             return quotas[0].total_collected, 1
@@ -408,6 +421,7 @@ class Run(pydantic.BaseModel):
                 - previous_sold
                 + (pace_average * 3)
             ) >= quota.amount:
+                assert isinstance(projected_on_ship, int)
                 projected_on_ship_amounts.append(projected_on_ship)
                 previous_sold = quota.sold
                 max_quota_amount = quota.amount
@@ -440,6 +454,11 @@ class Run(pydantic.BaseModel):
         last_quota = quotas[-1]
         average_top_line = self.get_average_top_line(self.fromq)
         average_bottom_line = self.get_average_bottom_line(self.fromq)
+        if math.isnan(average_top_line) or math.isnan(average_bottom_line):
+            return []
+        assert isinstance(average_top_line, int) and isinstance(
+            average_bottom_line, int
+        )
         if last_quota.sold == 0:
             last_quota.sold = calculate_overtime_sell(1500, last_quota.amount)
         if len(last_quota.days) < 3:
@@ -537,25 +556,61 @@ class Run(pydantic.BaseModel):
             previous_quota_number, quota_value, previous_quota_value
         )
 
+    def write_overlay(self):
+        if self.write_stream_overlay:
+            self.stream_overlay_path.parent.mkdir(parents=True, exist_ok=True)
+            self.stream_overlay_path.write_text(self.stream_overlay())
+
     def write_run(self):
         pydantic_yaml.to_yaml_file(self.get_run_file(), self)
+        self.write_overlay()
 
     def quota_chance(
-        self, target_quota_amount: int, wanted_credits: int = 1500
+        self, target_quota_amount: int = 0, wanted_credits: int = 1500
     ) -> float:
+        if not target_quota_amount:
+            target_quota_amount = self.quota_chance_amount
+        top_line = self.get_average_top_line(self.fromq)
+        if isinstance(top_line, float):
+            return float("NaN")
         return calculate_quota_chance(
             wanted_credits,
             target_quota_amount,
             self.current_quota_amount,
             self.current_quota_number,
             self.on_ship,
-            self.get_average_top_line(self.fromq),
+            top_line,
             self.quotas[-1].days_played,
         )
 
     def printable(self) -> str:
         """Too lazy to deal with altering pydantic repr (assuming it's not just def __repr__(self):), so we're just doing this."""
         return f"{self.run_date}|{self.version}|{', '.join(self.players)}|{self.run_title}|Quota {self.current_quota_number}—{self.current_quota_amount}|On ship: {self.on_ship}"
+
+    def stream_overlay(self) -> str:
+        """
+        Outputs a nice overlay for streaming. Doesn't actually write it out.
+        TODO: Take advantage of the nice templating library in Python 3.14 when you can
+        TODO: Make this less hideous.
+        """
+        quota_amount: str | int | float
+        quota_number: str | int | float
+        quota_amount, quota_number = self.pace
+        needed_target_average: str | int | float = self.needed_average
+        quota_chance = f"{round(self.quota_chance() * 100, 2)}%"
+        if self.wiped:
+            quota_amount = "wiped"
+            needed_target_average = "wiped"
+            quota_chance = "wiped"
+        return f"""
+Q1/Q2+ avg: {self.get_average_top_line(1)}/{self.get_average_top_line(2)}
+On ship: {self.on_ship}
+Needed avg for Q{self.target_quota}: {needed_target_average}
+Q{self.current_quota_number} roll percentage: {int(round(self.get_quota_roll(quota_number=None) * 100, 0))}%
+Clear Efficiency: {round(self.efficiency * 100, 2)}%
+Pace: Q{quota_number}/{quota_amount}
+{util.human_format(self.quota_chance_amount)} chance: {quota_chance}
+""".strip()
 
 
 class CurrentRun(pydantic.BaseModel):
@@ -608,14 +663,20 @@ def start_run(
     ] = "hq",
     version: Annotated[
         str, typer.Option(help="The version of Lethal Company being played")
-    ] = "v73",
+    ] = "",
     players: Annotated[
         list[str] | None, typer.Option(help="The players in the current run")
     ] = None,
-    target_quota_amount: Annotated[
+    desired_quota: Annotated[
         int,
         typer.Option("--target-quota", help="The quota the current run is targeting"),
-    ] = 20,
+    ] = 0,
+    quota_chance_calculator_target: Annotated[
+        int,
+        typer.Option(
+            help="The default quota value to use when calculating chances of reaching"
+        ),
+    ] = 0,
 ):
     if not players:
         print("No players set for run.", file=sys.stderr)
@@ -623,6 +684,13 @@ def start_run(
     run_directory.mkdir(parents=True, exist_ok=True)
     run_date = datetime.datetime.now().astimezone().replace(microsecond=0)
     new_run_file = run_directory / f"run-{run_date.isoformat()}.yaml"
+    config = settings.Settings()
+    if not version:
+        version = config.default_version
+    if not desired_quota:
+        desired_quota = config.default_target_quota
+    if not quota_chance_calculator_target:
+        quota_chance_calculator_target = config.default_quota_chance_amount
     new_run = Run(
         quotas=[Quota(days=[], amount=130, sold=0, roll=spooky_guoda_number, number=1)],
         run_title=run_title,
@@ -630,11 +698,15 @@ def start_run(
         run_type=run_type,
         version=version,
         players=set(players),
-        target_quota=target_quota_amount,
+        target_quota=desired_quota,
+        write_stream_overlay=config.should_write_overlay,
+        stream_overlay_path=config.overlay_output_path,
+        quota_chance_amount=quota_chance_calculator_target,
     )
     pydantic_yaml.to_yaml_file(new_run_file, new_run)
     current_run = CurrentRun(current_run=new_run_file)
     pydantic_yaml.to_yaml_file(current_run_file, current_run)
+    new_run.write_overlay()
 
 
 @app.command(help="Updates the currently selected run")
@@ -661,6 +733,12 @@ def update_run(
     wiped: Annotated[
         bool | None, typer.Option(help="Whether or not the run has wiped")
     ] = None,
+    quota_chance_calculator_target: Annotated[
+        int,
+        typer.Option(
+            help="The default quota value to use when calculating chances of reaching"
+        ),
+    ] = 0,
 ):
     run = Run.get_run()
     if run_title:
@@ -675,6 +753,8 @@ def update_run(
         run.target_quota = target_quota_amount
     if wiped is not None:
         run.wiped = wiped
+    if quota_chance_calculator_target:
+        run.quota_chance_amount = quota_chance_calculator_target
     run.write_run()
 
 
@@ -868,7 +948,7 @@ def calculate_overtime(
 
 @app.command(help="Shows the chance of reaching a given quota amount")
 def chance(
-    target: Annotated[int, typer.Argument(help="The amount you want to reach")],
+    target: Annotated[int, typer.Argument(help="The amount you want to reach")] = 0,
     base_sell: Annotated[
         int, typer.Option(help="The minimum amount you need to sell each quota")
     ] = 1500,
@@ -892,6 +972,12 @@ def store():
     if sold_amount is not None:
         run.update_quota(amount=None, sold=sold_amount)
         run.write_run()
+
+
+@app.command(help="Prints a stream overlay to stdout")
+def overlay():
+    run = Run.get_run()
+    print(run.stream_overlay())
 
 
 if __name__ == "__main__":
