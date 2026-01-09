@@ -607,7 +607,7 @@ Q1/Q2+ avg: {self.get_average_top_line(1)}/{self.get_average_top_line(2)}
 On ship: {self.on_ship}
 Needed avg for Q{self.target_quota}: {needed_target_average}
 Q{self.current_quota_number} roll percentage: {int(round(self.get_quota_roll(quota_number=None) * 100, 0))}%
-Clear Efficiency: {round(self.efficiency * 100, 2)}%
+Clear efficiency: {round(self.efficiency * 100, 2)}%
 Pace: Q{quota_number}/{quota_amount}
 {util.human_format(self.quota_chance_amount)} chance: {quota_chance}
 """.strip()
