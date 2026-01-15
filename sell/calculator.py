@@ -401,3 +401,19 @@ def calculate_overtime_sell(wanted_credits: int, quota_amount: int) -> int:
     if quota_amount < wanted_credits - 75:
         return math.floor(((5 * wanted_credits) + 75 + quota_amount + 5) / 6)
     return max(wanted_credits, quota_amount)
+
+
+def calculate_early_sell(quota_days_played: int, quota_amount: int) -> int:
+    assert 0 <= quota_days_played <= 3
+    match quota_days_played:
+        case 0:
+            # TODO double check this
+            sell_divisor = 30.333333
+        case 1:
+            sell_divisor = 53.333333
+        case 2:
+            sell_divisor = 76.666666
+        case 3:
+            sell_divisor = 100
+
+    return math.ceil((quota_amount * 100) / sell_divisor)

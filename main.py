@@ -21,6 +21,7 @@ import typer
 import xdg_base_dirs
 from typer.models import OptionInfo
 
+import lc_types
 import sell
 import settings
 import util
@@ -177,54 +178,59 @@ def calculate_quota_chance(
     return successful_iterations / iterations
 
 
-WeatherTypesLiteral = typing.Literal[
-    "clear", "stormy", "rainy", "flooded", "eclipsed", "foggy"
-]
-
 WeatherTypes = Annotated[
     str,
     typer.Option(
         help="The weather for the day",
-        click_type=click.Choice(WeatherTypesLiteral.__args__),
+        click_type=click.Choice(lc_types.WeatherTypesLiteral.__args__),
     ),
-]
-MoonTypesLiteral = typing.Literal[
-    "experimentation",
-    "assurance",
-    "vow",
-    "offense",
-    "march",
-    "adamance",
-    "rend",
-    "dine",
-    "titan",
-    "artifice",
-    "embrion",
 ]
 MoonTypes = Annotated[
     str,
     typer.Option(
         help="The moon being landed on",
-        click_type=click.Choice(MoonTypesLiteral.__args__),
+        click_type=click.Choice(lc_types.MoonTypesLiteral.__args__),
     ),
 ]
-LayoutTypesLiteral = typing.Literal["facility", "mansion", "mineshaft", ""]
+
 LayoutTypes = Annotated[
     str,
     typer.Option(
         help="The interior type",
-        click_type=click.Choice(LayoutTypesLiteral.__args__),
+        click_type=click.Choice(lc_types.LayoutTypesLiteral.__args__),
     ),
 ]
 
-RunTypesLiteral = typing.Literal["smhq", "hq"]
 RunTypes = Annotated[
     str,
     typer.Option(
         help="The type of run",
-        click_type=click.Choice(RunTypesLiteral.__args__),
+        click_type=click.Choice(lc_types.RunTypesLiteral.__args__),
         default="hq",
     ),
+]
+
+InfestationTypes = Annotated[
+    str,
+    typer.Option(
+        help="The type of infestation for a day",
+        click_type=click.Choice(lc_types.InfestationTypesLiteral.__args__),
+        default="",
+    ),
+]
+
+SingleItemDayTypes = Annotated[
+    str,
+    typer.Option(
+        help="The type of single item day",
+        click_type=click.Choice(lc_types.ItemTypesLiteral.__args__),
+        default="",
+    ),
+]
+
+EntryTimeType = Annotated[
+    datetime.datetime,
+    typer.Option(default_factory=lambda: datetime.datetime.now().astimezone().replace(microsecond=0))
 ]
 
 
@@ -253,6 +259,14 @@ class Day(pydantic.BaseModel):
         int, typer.Option(help="The bottom line on the results screen")
     ] = 0
     layout: LayoutTypes = ""
+    meteor_shower: bool = False
+    indoor_fog: bool = False
+    infestation: InfestationTypes = ""
+    single_item_day: SingleItemDayTypes = ""
+    unsafe_deaths: Annotated[
+        list[str], typer.Option("Unsafe deaths for the day", default_factory=list)
+    ] = pydantic.Field(default_factory=list)
+    entry_time: EntryTimeType = pydantic.Field(default_factory=lambda: datetime.datetime.now().astimezone().replace(microsecond=0))
 
 
 class Quota(pydantic.BaseModel):
@@ -263,6 +277,7 @@ class Quota(pydantic.BaseModel):
     r_value: float | None = None
     number: int
     is_projected: bool = False
+    entry_time: EntryTimeType = pydantic.Field(default_factory=lambda: datetime.datetime.now().astimezone().replace(microsecond=0))
 
     def add_day(self, day: Day) -> None:
         self.days.append(day)
@@ -310,6 +325,7 @@ class Run(pydantic.BaseModel):
     run_date: datetime.datetime = pydantic.Field(default_factory=datetime.datetime.now)
     run_title: str = ""
     run_type: RunTypes = "hq"
+    moon: MoonTypes = ""
     wiped: bool = False
     version: str = "v73"
     players: set[str] = pydantic.Field(default_factory=set)
@@ -333,12 +349,26 @@ class Run(pydantic.BaseModel):
         return pydantic_yaml.parse_yaml_file_as(cls, run_file)
 
     @property
+    def current_day(self) -> Day | None:
+        if len(days := self.current_quota.days) != 0:
+            return days[-1]
+        return None
+
+    @property
+    def current_quota(self) -> Quota:
+        return self.quotas[-1]
+
+    @current_quota.setter
+    def current_quota(self, quota: Quota) -> None:
+        self.quotas[-1] = quota
+
+    @property
     def quota_count(self) -> int:
         return len(self.quotas) + 1
 
     @property
     def current_quota_number(self) -> int:
-        return self.quotas[-1].number
+        return self.current_quota.number
 
     @property
     def on_ship(self) -> int:
@@ -358,7 +388,7 @@ class Run(pydantic.BaseModel):
 
     @property
     def current_quota_amount(self) -> int:
-        return self.quotas[-1].amount
+        return self.current_quota.amount
 
     @property
     def efficiency(self) -> float:
@@ -497,33 +527,48 @@ class Run(pydantic.BaseModel):
     def add_quota(self, amount: int, sold: int) -> None:
         quota = Quota(days=[], amount=amount, sold=sold, number=len(self.quotas) + 1)
         quota.r_value, quota.roll = quota.calculate_r_value_and_roll(
-            self.quotas[-1].amount
+            self.current_quota.amount
         )
         self.quotas.append(quota)
 
-    def update_quota(self, amount: int | None, sold: int | None) -> None:
+    def update_quota(
+        self, amount: int | None, sold: int | None, quota_number: int
+    ) -> None:
         kwargs = {}
         if amount is not None:
             kwargs["amount"] = amount
         if sold is not None:
             kwargs["sold"] = sold
-        old_quota = self.quotas[-1]
-        quota = Quota(days=[], number=old_quota.number, is_projected=False, **kwargs)
+        if len(self.quotas) < quota_number:
+            raise RuntimeError(
+                f"Cannot update quota {quota_number} as there are only {len(self.quotas)} quotas."
+            )
+        quota_index = quota_number - 1
+        old_quota = self.quotas[quota_index]
+        new_quota = Quota(
+            days=[], number=old_quota.number, is_projected=False, **kwargs
+        )
         base = old_quota.model_dump(
             exclude_defaults=True, exclude_unset=True, exclude_none=True
         )
-        new_data = quota.model_dump(
+        new_data = new_quota.model_dump(
             exclude_defaults=True, exclude_none=True, exclude_unset=True
         )
-        quota = quota.model_validate({**base, **new_data})
-        if quota.number != 1:
-            quota.r_value, quota.roll = quota.calculate_r_value_and_roll(
-                self.quotas[-2].amount
+        new_quota = new_quota.model_validate({**base, **new_data})
+        if new_quota.number != 1:
+            new_quota.r_value, new_quota.roll = new_quota.calculate_r_value_and_roll(
+                self.quotas[quota_index - 1].amount
             )
-        self.quotas[-1] = quota
+        self.quotas[quota_index] = new_quota
 
     def add_day(self, day: Day) -> None:
-        self.quotas[-1].days.append(day)
+        if len(self.current_quota.days) >= 3:
+            print(
+                "WARNING: You forgot to input a quota. Creating a new quota, be sure to update it with the amount and input the previous sell.",
+                file=sys.stderr,
+            )
+            self.add_quota(amount=0, sold=0)
+        self.current_quota.days.append(day)
 
     def get_quota_roll(self, quota_number: int | None) -> float:
         if quota_number is None:
@@ -580,7 +625,7 @@ class Run(pydantic.BaseModel):
             self.current_quota_number,
             self.on_ship,
             top_line,
-            self.quotas[-1].days_played,
+            self.current_quota.days_played,
         )
 
     def printable(self) -> str:
@@ -602,15 +647,16 @@ class Run(pydantic.BaseModel):
             quota_amount = "wiped"
             needed_target_average = "wiped"
             quota_chance = "wiped"
-        return f"""
-Q1/Q2+ avg: {self.get_average_top_line(1)}/{self.get_average_top_line(2)}
-On ship: {self.on_ship}
-Needed avg for Q{self.target_quota}: {needed_target_average}
-Q{self.current_quota_number} roll percentage: {int(round(self.get_quota_roll(quota_number=None) * 100, 0))}%
-Clear efficiency: {round(self.efficiency * 100, 2)}%
-Pace: Q{quota_number}/{quota_amount}
-{util.human_format(self.quota_chance_amount)} chance: {quota_chance}
-""".strip()
+        overlay_text = textwrap.dedent(f"""
+        Q1/Q2+ avg: {self.get_average_top_line(1)}/{self.get_average_top_line(2)}
+        On ship: {self.on_ship}
+        Needed avg for Q{self.target_quota}: {needed_target_average}
+        Q{self.current_quota_number} roll percentage: {int(round(self.get_quota_roll(quota_number=None) * 100, 0))}%
+        Clear efficiency: {round(self.efficiency * 100, 2)}%
+        Pace: Q{quota_number}/{quota_amount}
+        {util.human_format(self.quota_chance_amount)} chance: {quota_chance}
+        """).strip()
+        return overlay_text
 
 
 class CurrentRun(pydantic.BaseModel):
@@ -650,6 +696,8 @@ def set_current_run(
     run_file = run_directory / f"run-{selected_run.run_date.isoformat()}.yaml"
     current_run = CurrentRun(current_run=run_file)
     pydantic_yaml.to_yaml_file(current_run_file, current_run)
+    run = Run.get_run()
+    run.write_overlay()
 
 
 @app.command(help="Starts a new run")
@@ -661,6 +709,7 @@ def start_run(
         str,
         typer.Option(help="The type of run", click_type=click.Choice(["hq", "smhq"])),
     ] = "hq",
+    smhq_moon: MoonTypes = "",
     version: Annotated[
         str, typer.Option(help="The version of Lethal Company being played")
     ] = "",
@@ -702,6 +751,7 @@ def start_run(
         write_stream_overlay=config.should_write_overlay,
         stream_overlay_path=config.overlay_output_path,
         quota_chance_amount=quota_chance_calculator_target,
+        moon=smhq_moon,
     )
     pydantic_yaml.to_yaml_file(new_run_file, new_run)
     current_run = CurrentRun(current_run=new_run_file)
@@ -762,6 +812,8 @@ def update_run(
 @app.command(help="Adds a new day")
 def add_day(day: Annotated[Day, typer.Option()]):
     run = Run.get_run()
+    if run.run_type == "smhq":
+        day.moon = run.moon
     run.add_day(day)
     run.write_run()
 
@@ -770,7 +822,14 @@ def add_day(day: Annotated[Day, typer.Option()]):
 @app.command(help="Updates the current day")
 def update_day(day: Annotated[Day, typer.Option()]):
     run = Run.get_run()
-    old_day = run.quotas[-1].days[-1]
+    old_day = run.current_day
+    if old_day is None:
+        print(
+            "This is the first day of the quota, there is no day to edit.",
+            file=sys.stderr,
+        )
+        raise typer.Abort()
+    old_day = run.current_quota.days[-1]
     base = old_day.model_dump(
         exclude_defaults=True, exclude_none=True, exclude_unset=True
     )
@@ -778,7 +837,7 @@ def update_day(day: Annotated[Day, typer.Option()]):
         exclude_defaults=True, exclude_none=True, exclude_unset=True
     )
     day = day.model_validate({**base, **new_data})
-    run.quotas[-1].days[-1] = day
+    run.current_quota.days[-1] = day
     run.write_run()
 
 
@@ -804,9 +863,14 @@ def add_quota(
 def update_quota(
     amount: Annotated[int | None, AmountOption] = None,
     sold: Annotated[int | None, SoldOption] = None,
+    quota_number: Annotated[
+        typing.Literal["latest"] | int, typer.Option(default="latest", min=1)
+    ] = "latest",
 ):
     run = Run.get_run()
-    run.update_quota(amount=amount, sold=sold)
+    if quota_number == "latest":
+        quota_number = run.current_quota_number
+    run.update_quota(amount=amount, sold=sold, quota_number=quota_number)
     run.write_run()
 
 
@@ -922,6 +986,18 @@ def target_quota():
     print(run.target_quota)
 
 
+@app.command(help="Show the amount we need to sell, accounting for early sells")
+def sell_amount():
+    run = Run.get_run()
+    for day in range(run.current_quota.days_played, 4):  # stupid non-inclusive range
+        sell_amount = str(
+            sell.calculator.calculate_early_sell(day, run.current_quota_amount)
+        )
+        if day == run.current_quota.days_played:
+            sell_amount = f"{sell_amount} ← Current amount needed"
+        print(sell_amount)
+
+
 @app.command(help="Shows how much loot has been collected in total")
 def calculate_overtime(
     desired_amount: Annotated[
@@ -970,7 +1046,9 @@ def store():
         quota=run.current_quota_amount, moon_amount=1500, version=run.version
     )
     if sold_amount is not None:
-        run.update_quota(amount=None, sold=sold_amount)
+        run.update_quota(
+            amount=None, sold=sold_amount, quota_number=run.current_quota_number
+        )
         run.write_run()
 
 
