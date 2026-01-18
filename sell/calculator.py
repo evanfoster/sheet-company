@@ -27,27 +27,12 @@ from textual.widgets import (
 cache_directory = xdg_base_dirs.xdg_cache_home() / "sheet-company"
 
 
-def get_script_dir() -> Path:
-    return Path(__file__).resolve().parent
-
-
 class StoreItem(typing.NamedTuple):
     quantity: int
     sale_percentage: int
     item_name: str
     sale_price: float | int
     original_price: int
-
-
-def get_store_data(version: str, preset: int | None = None) -> list[StoreItem]:
-    script_dir = get_script_dir()
-    store_price_file = script_dir / "data" / version / "store-prices.json"
-    if preset is not None:
-        store_price_file = script_dir / "data" / version / "presets" / f"{preset}.json"
-    if not store_price_file.exists():
-        raise FileNotFoundError(f"Store price file {store_price_file} not found")
-    prices = json.loads(store_price_file.read_text())
-    return [StoreItem(*item) for item in prices]
 
 
 class StoreItemList(collections.UserList):
@@ -63,57 +48,6 @@ class StoreItemList(collections.UserList):
         for item in self.data:
             output.extend([f"{item.quantity} {item.item_name}", "confirm"])
         return output
-
-
-def chunk_buy_lists(buy_list: list[StoreItem]) -> list[StoreItemList]:
-    naive_buy_list = list(
-        sorted(
-            filter(lambda x: x.quantity > 0, buy_list),
-            key=lambda x: x.quantity,
-            reverse=True,
-        )
-    )
-    buy_list = []
-    for item in naive_buy_list:
-        # This is _not_ a protected member, idiot.
-        # noinspection PyProtectedMember
-        item_dict = item._asdict()
-        # Items with a decimal point should be purchased one at a time so that the value gets rounded down
-        if isinstance(item.sale_price, float):
-            item_dict["quantity"] = 1
-            for _ in range(item.quantity):
-                buy_list.append(StoreItem(**item_dict))
-        # If purchasing more than 10 items, you need to split it up and buy the remaining items separately
-        elif item.quantity > 10:
-            remaining_quantity = item.quantity
-            while remaining_quantity > 10:
-                item_dict["quantity"] = 10
-                buy_list.append(StoreItem(**item_dict))
-                remaining_quantity -= 10
-            item_dict["quantity"] = remaining_quantity
-            buy_list.append(StoreItem(**item_dict))
-        else:
-            buy_list.append(item)
-    buy_list.sort(key=lambda x: x.quantity, reverse=True)
-    # time for binpacking
-    item_bins: list[StoreItemList] = []
-    cruiser: StoreItem | None = None
-    for item in buy_list:
-        # Cruiser should always be in its own bin.
-        if item.item_name == "Cruiser":
-            cruiser = item
-            continue
-        for item_bin in item_bins:
-            if len(item_bin) + item.quantity <= StoreItemList.max_length:
-                item_bin.append(item)
-                break
-        else:
-            item_bin = StoreItemList([item])
-            item_bins.append(item_bin)
-    if cruiser:
-        print(type(cruiser))
-        item_bins.append(StoreItemList([cruiser]))
-    return item_bins
 
 
 class BuyScreen(Screen):
@@ -137,32 +71,32 @@ class BuyScreen(Screen):
 
 class ConfirmScreen(Screen):
     CSS = """
-ConfirmScreen {
-    align: center middle;
-}
+ ConfirmScreen {
+     align: center middle;
+ }
 
-#dialog {
-    grid-size: 2;
-    grid-gutter: 1 2;
-    grid-rows: 1fr 3;
-    padding: 0 1;
-    width: 60;
-    height: 11;
-    border: thick $background 80%;
-    background: $surface;
-}
+ #dialog {
+     grid-size: 2;
+     grid-gutter: 1 2;
+     grid-rows: 1fr 3;
+     padding: 0 1;
+     width: 60;
+     height: 11;
+     border: thick $background 80%;
+     background: $surface;
+ }
 
-#question {
-    column-span: 2;
-    height: 1fr;
-    width: 1fr;
-    content-align: center middle;
-}
+ #question {
+     column-span: 2;
+     height: 1fr;
+     width: 1fr;
+     content-align: center middle;
+ }
 
-Button {
-    width: 100%;
-}
-    """
+ Button {
+     width: 100%;
+ }
+     """
 
     def __init__(self, *args, sell_total: int = 0, **kwargs):
         super().__init__(*args, **kwargs)
@@ -333,9 +267,8 @@ class Store(App):
         cache_directory.mkdir(parents=True, exist_ok=True)
         pasted_dir = cache_directory / "pasted"
         pasted_file = pasted_dir / "pasted"
-        print(f"Watching {pasted_file}")
         pasted_file.parent.mkdir(parents=True, exist_ok=True)
-        chunked_buys = chunk_buy_lists(store_table.all_rows)
+        chunked_buys = construct_buy_command_list(store_table.all_rows)
         pasted_file.unlink(missing_ok=True)
         messages = [ListItem(Label("Starting buy"))]
         for chunk in chunked_buys:
@@ -362,8 +295,6 @@ class Store(App):
                         await self.app.pop_screen()
                         self.stop_buy_event.clear()
                         return
-                print(index)
-                print(len(chunked_buys))
                 if index + 1 == len(chunked_buys):
                     break
                 pyperclip.copy("")
@@ -389,6 +320,71 @@ class Store(App):
         async for _ in asyncio.as_completed(tasks):
             print("Exiting")
             return
+
+
+def get_script_dir() -> Path:
+    return Path(__file__).resolve().parent
+
+
+def get_store_data(version: str, preset: int | None = None) -> list[StoreItem]:
+    script_dir = get_script_dir()
+    store_price_file = script_dir / "data" / version / "store-prices.json"
+    if preset is not None:
+        store_price_file = script_dir / "data" / version / "presets" / f"{preset}.json"
+    if not store_price_file.exists():
+        raise FileNotFoundError(f"Store price file {store_price_file} not found")
+    prices = json.loads(store_price_file.read_text())
+    return [StoreItem(*item) for item in prices]
+
+
+def construct_buy_command_list(buy_list: list[StoreItem]) -> list[StoreItemList]:
+    naive_buy_list = list(
+        sorted(
+            filter(lambda x: x.quantity > 0, buy_list),
+            key=lambda x: x.quantity,
+            reverse=True,
+        )
+    )
+    buy_list = []
+    for item in naive_buy_list:
+        # This is _not_ a protected member, idiot.
+        # noinspection PyProtectedMember
+        item_dict = item._asdict()
+        # Items with a decimal point should be purchased one at a time so that the value gets rounded down
+        if isinstance(item.sale_price, float):
+            item_dict["quantity"] = 1
+            for _ in range(item.quantity):
+                buy_list.append(StoreItem(**item_dict))
+        # If purchasing more than 10 items, you need to split it up and buy the remaining items separately
+        elif item.quantity > 10:
+            remaining_quantity = item.quantity
+            while remaining_quantity > 10:
+                item_dict["quantity"] = 10
+                buy_list.append(StoreItem(**item_dict))
+                remaining_quantity -= 10
+            item_dict["quantity"] = remaining_quantity
+            buy_list.append(StoreItem(**item_dict))
+        else:
+            buy_list.append(item)
+    buy_list.sort(key=lambda x: x.quantity, reverse=True)
+    # time for binpacking
+    item_bins: list[StoreItemList] = []
+    cruiser: StoreItem | None = None
+    for item in buy_list:
+        # Cruiser should always be in its own bin.
+        if item.item_name == "Cruiser":
+            cruiser = item
+            continue
+        for item_bin in item_bins:
+            if len(item_bin) + item.quantity <= StoreItemList.max_length:
+                item_bin.append(item)
+                break
+        else:
+            item_bin = StoreItemList([item])
+            item_bins.append(item_bin)
+    if cruiser:
+        item_bins.append(StoreItemList([cruiser]))
+    return item_bins
 
 
 def run(quota: int, moon_amount: int, version: str) -> int | None:

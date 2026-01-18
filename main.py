@@ -31,153 +31,6 @@ from sell.calculator import calculate_overtime_sell
 spooky_guoda_number = 0.51270322870301
 
 
-def flatten_args(func: Callable) -> Callable:
-    """Flatten command line arguments to the underling pydantic class field names."""
-    if hasattr(func, "__annotations__"):
-        for value in func.__annotations__.values():
-            function_args = get_args(value)
-            option_info = next(
-                (arg for arg in function_args if isinstance(arg, OptionInfo)), None
-            )
-            qualifiers = next(
-                (arg for arg in function_args if isinstance(arg, list)), None
-            )
-            if option_info is not None and qualifiers is not None:
-                option_info.default = f"--{qualifiers[-1].replace('_', '-')}"
-
-    def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
-def reverse_quota_curve(
-    previous_quota_count: int, current_quota: int, previous_quota: int
-) -> float:
-    # Adapted from Maku's glorious MakuSheet. I don't get how it works, but _god damn_ does it work.
-    r_value = (
-        (current_quota - previous_quota) / 100 / (1 + (previous_quota_count**2) / 16)
-    ) - 1
-
-    if r_value <= -0.1302:
-        roll = (
-            -0.160907593946605
-            * pow(
-                -r_value
-                + pow(
-                    pow(-r_value - 0.120329719101165, 2) + 5.84171028339325 * 0.00001,
-                    0.5,
-                )
-                - 0.120329719101165,
-                1 / 3,
-            )
-            + 0.140363846903451
-            + 0.00624342950447879
-            / pow(
-                -r_value
-                + pow(
-                    pow(-r_value - 0.120329719101165, 2) + 5.84171028339325 * 0.00001,
-                    0.5,
-                )
-                - 0.120329719101165,
-                1 / 3,
-            )
-        )
-
-    elif r_value <= 0.1534:
-        roll = (
-            -0.955441906274132
-            * pow(
-                -r_value
-                + pow(pow(0.0183063044253273 - r_value, 2) + 0.00616352354339119, 0.5)
-                + 0.0183063044253273,
-                1 / 3,
-            )
-            + 0.511256642996555
-            + 0.175178433678035
-            / pow(
-                -r_value
-                + pow(pow(0.0183063044253273 - r_value, 2) + 0.00616352354339119, 0.5)
-                + 0.0183063044253273,
-                1 / 3,
-            )
-        )
-    else:
-        roll = (
-            -0.160571168650179
-            * pow(
-                -r_value
-                + pow(pow(0.146192009650422 - r_value, 2) + 0.000100776549962117, 0.5)
-                + 0.146192009650422,
-                1 / 3,
-            )
-            + 0.864861513055629
-            + 0.00747229593834329
-            / pow(
-                -r_value
-                + pow(pow(0.146192009650422 - r_value, 2) + 0.000100776549962117, 0.5)
-                + 0.146192009650422,
-                1 / 3,
-            )
-        )
-
-    return min(max(0.0001, roll), 0.9999)
-
-
-def quota_curve(r_value: float) -> float:
-    """
-    Generates a quota curve for a given r value. We only use this when calculating the chance we'll reach
-    a particular quota amount, since pace calculations want to use the absolute midroll in all cases.
-    """
-    if r_value <= 0.1172:
-        return (
-            (120.0163409 * r_value - 50.5378659) * r_value + 7.4554
-        ) * r_value - 0.503
-    elif r_value <= 0.8804:
-        return (
-            (0.57326727 * r_value - 0.8792601) * r_value + 0.73737564
-        ) * r_value - 0.20546592
-    else:
-        return (
-            (120.77228959 * r_value - 313.35391533) * r_value + 271.4424619
-        ) * r_value - 78.35783615
-
-
-def increment_quota(quota_number: int, r_value: float) -> int:
-    return math.floor(
-        100 * (1 + quota_number * quota_number / 16) * (1 + quota_curve(r_value))
-    )
-
-
-def calculate_quota_chance(
-    wanted_credits: int,
-    target_quota_amount: int,
-    current_quota_amount: int,
-    current_quota_number: int,
-    current_ship_loot: int,
-    current_average: int,
-    quota_days_played: int,
-) -> float:
-    iterations: int = int(1e5)
-    successful_iterations: int = 0
-    for i in range(iterations):
-        total: int = 0
-        previous_quota_amount: int = -1
-        quota_amount = current_quota_amount
-        quota_number = current_quota_number
-        days_to_play = 0 - quota_days_played
-        while current_ship_loot + current_average * days_to_play >= total:
-            total += calculate_overtime_sell(wanted_credits, quota_amount)
-            previous_quota_amount = quota_amount
-            quota_amount += increment_quota(quota_number, random.random())
-            quota_number += 1
-            days_to_play += 3
-        if previous_quota_amount >= target_quota_amount:
-            successful_iterations += 1
-
-    return successful_iterations / iterations
-
-
 WeatherTypes = Annotated[
     str,
     typer.Option(
@@ -230,7 +83,11 @@ SingleItemDayTypes = Annotated[
 
 EntryTimeType = Annotated[
     datetime.datetime,
-    typer.Option(default_factory=lambda: datetime.datetime.now().astimezone().replace(microsecond=0))
+    typer.Option(
+        default_factory=lambda: datetime.datetime.now()
+        .astimezone()
+        .replace(microsecond=0)
+    ),
 ]
 
 
@@ -266,7 +123,11 @@ class Day(pydantic.BaseModel):
     unsafe_deaths: Annotated[
         list[str], typer.Option("Unsafe deaths for the day", default_factory=list)
     ] = pydantic.Field(default_factory=list)
-    entry_time: EntryTimeType = pydantic.Field(default_factory=lambda: datetime.datetime.now().astimezone().replace(microsecond=0))
+    entry_time: EntryTimeType = pydantic.Field(
+        default_factory=lambda: datetime.datetime.now()
+        .astimezone()
+        .replace(microsecond=0)
+    )
 
 
 class Quota(pydantic.BaseModel):
@@ -277,7 +138,11 @@ class Quota(pydantic.BaseModel):
     r_value: float | None = None
     number: int
     is_projected: bool = False
-    entry_time: EntryTimeType = pydantic.Field(default_factory=lambda: datetime.datetime.now().astimezone().replace(microsecond=0))
+    entry_time: EntryTimeType = pydantic.Field(
+        default_factory=lambda: datetime.datetime.now()
+        .astimezone()
+        .replace(microsecond=0)
+    )
 
     def add_day(self, day: Day) -> None:
         self.days.append(day)
@@ -545,8 +410,12 @@ class Run(pydantic.BaseModel):
             )
         quota_index = quota_number - 1
         old_quota = self.quotas[quota_index]
+        # mypy is being inflexible about **kwargs here.
         new_quota = Quota(
-            days=[], number=old_quota.number, is_projected=False, **kwargs
+            days=[],
+            number=old_quota.number,
+            is_projected=False,
+            **kwargs,  # type: ignore
         )
         base = old_quota.model_dump(
             exclude_defaults=True, exclude_unset=True, exclude_none=True
@@ -661,6 +530,153 @@ class Run(pydantic.BaseModel):
 
 class CurrentRun(pydantic.BaseModel):
     current_run: Path
+
+
+def flatten_args(func: Callable) -> Callable:
+    """Flatten command line arguments to the underling pydantic class field names."""
+    if hasattr(func, "__annotations__"):
+        for value in func.__annotations__.values():
+            function_args = get_args(value)
+            option_info = next(
+                (arg for arg in function_args if isinstance(arg, OptionInfo)), None
+            )
+            qualifiers = next(
+                (arg for arg in function_args if isinstance(arg, list)), None
+            )
+            if option_info is not None and qualifiers is not None:
+                option_info.default = f"--{qualifiers[-1].replace('_', '-')}"
+
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+def reverse_quota_curve(
+    previous_quota_count: int, current_quota: int, previous_quota: int
+) -> float:
+    # Adapted from Maku's glorious MakuSheet. I don't get how it works, but _god damn_ does it work.
+    r_value = (
+        (current_quota - previous_quota) / 100 / (1 + (previous_quota_count**2) / 16)
+    ) - 1
+
+    if r_value <= -0.1302:
+        roll = (
+            -0.160907593946605
+            * pow(
+                -r_value
+                + pow(
+                    pow(-r_value - 0.120329719101165, 2) + 5.84171028339325 * 0.00001,
+                    0.5,
+                )
+                - 0.120329719101165,
+                1 / 3,
+            )
+            + 0.140363846903451
+            + 0.00624342950447879
+            / pow(
+                -r_value
+                + pow(
+                    pow(-r_value - 0.120329719101165, 2) + 5.84171028339325 * 0.00001,
+                    0.5,
+                )
+                - 0.120329719101165,
+                1 / 3,
+            )
+        )
+
+    elif r_value <= 0.1534:
+        roll = (
+            -0.955441906274132
+            * pow(
+                -r_value
+                + pow(pow(0.0183063044253273 - r_value, 2) + 0.00616352354339119, 0.5)
+                + 0.0183063044253273,
+                1 / 3,
+            )
+            + 0.511256642996555
+            + 0.175178433678035
+            / pow(
+                -r_value
+                + pow(pow(0.0183063044253273 - r_value, 2) + 0.00616352354339119, 0.5)
+                + 0.0183063044253273,
+                1 / 3,
+            )
+        )
+    else:
+        roll = (
+            -0.160571168650179
+            * pow(
+                -r_value
+                + pow(pow(0.146192009650422 - r_value, 2) + 0.000100776549962117, 0.5)
+                + 0.146192009650422,
+                1 / 3,
+            )
+            + 0.864861513055629
+            + 0.00747229593834329
+            / pow(
+                -r_value
+                + pow(pow(0.146192009650422 - r_value, 2) + 0.000100776549962117, 0.5)
+                + 0.146192009650422,
+                1 / 3,
+            )
+        )
+
+    return min(max(0.0001, roll), 0.9999)
+
+
+def quota_curve(r_value: float) -> float:
+    """
+    Generates a quota curve for a given r value. We only use this when calculating the chance we'll reach
+    a particular quota amount, since pace calculations want to use the absolute midroll in all cases.
+    """
+    if r_value <= 0.1172:
+        return (
+            (120.0163409 * r_value - 50.5378659) * r_value + 7.4554
+        ) * r_value - 0.503
+    elif r_value <= 0.8804:
+        return (
+            (0.57326727 * r_value - 0.8792601) * r_value + 0.73737564
+        ) * r_value - 0.20546592
+    else:
+        return (
+            (120.77228959 * r_value - 313.35391533) * r_value + 271.4424619
+        ) * r_value - 78.35783615
+
+
+def increment_quota(quota_number: int, r_value: float) -> int:
+    return math.floor(
+        100 * (1 + quota_number * quota_number / 16) * (1 + quota_curve(r_value))
+    )
+
+
+def calculate_quota_chance(
+    wanted_credits: int,
+    target_quota_amount: int,
+    current_quota_amount: int,
+    current_quota_number: int,
+    current_ship_loot: int,
+    current_average: int,
+    quota_days_played: int,
+) -> float:
+    iterations: int = int(1e5)
+    successful_iterations: int = 0
+    for i in range(iterations):
+        total: int = 0
+        previous_quota_amount: int = -1
+        quota_amount = current_quota_amount
+        quota_number = current_quota_number
+        days_to_play = 0 - quota_days_played
+        while current_ship_loot + current_average * days_to_play >= total:
+            total += calculate_overtime_sell(wanted_credits, quota_amount)
+            previous_quota_amount = quota_amount
+            quota_amount += increment_quota(quota_number, random.random())
+            quota_number += 1
+            days_to_play += 3
+        if previous_quota_amount >= target_quota_amount:
+            successful_iterations += 1
+
+    return successful_iterations / iterations
 
 
 run_directory = xdg_base_dirs.xdg_state_home() / "sheet-company"
