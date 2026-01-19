@@ -1,4 +1,52 @@
+import enum
 import typing
+
+
+class Versions(enum.StrEnum):
+    @staticmethod
+    def _generate_next_value_(name, start, count, last_values):
+        return name
+
+    v35 = enum.auto()
+    v36 = enum.auto()
+    v37 = enum.auto()
+    v38 = enum.auto()
+    v40 = enum.auto()
+    v45 = enum.auto()
+    v47 = enum.auto()
+    v48 = enum.auto()
+    v49 = enum.auto()
+    v50 = enum.auto()
+    v55 = enum.auto()
+    v56 = enum.auto()
+    v61 = enum.auto()
+    v64 = enum.auto()
+    v65 = enum.auto()
+    v66 = enum.auto()
+    v67 = enum.auto()
+    v68 = enum.auto()
+    v69 = enum.auto()
+    v70 = enum.auto()
+    v71 = enum.auto()
+    v72 = enum.auto()
+    v73 = enum.auto()
+
+
+class Dungeons(enum.IntEnum):
+    facility = 1
+    mansion = 2
+    facility_3_fire = 4
+    mineshaft = 5
+
+
+class Weathers(enum.IntEnum):
+    clear = 0
+    rainy = 1
+    stormy = 2
+    foggy = 3
+    flooded = 4
+    eclipsed = 5
+
 
 ItemTypesLiteral = typing.Literal[
     "Airhorn",
@@ -87,3 +135,5 @@ WeatherTypesLiteral = typing.Literal[
 ]
 LayoutTypesLiteral = typing.Literal["facility", "mansion", "mineshaft", ""]
 RunTypesLiteral = typing.Literal["smhq", "hq"]
+
+HazardTypesLiteral = typing.Literal["turret", "landmine", "spike trap"]

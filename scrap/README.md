@@ -1,0 +1,1 @@
+The Miraheze wiki is an excellent source of scrap data. The data for each version is stored under the Scraps module. Here's the v73 data as an example: https://lethal.miraheze.org/wiki/Module:Scraps/Data/v73

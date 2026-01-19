@@ -24,6 +24,8 @@ from textual.widgets import (
     ListView,
 )
 
+import util
+
 cache_directory = xdg_base_dirs.xdg_cache_home() / "sheet-company"
 
 
@@ -327,7 +329,7 @@ def get_script_dir() -> Path:
 
 
 def get_store_data(version: str, preset: int | None = None) -> list[StoreItem]:
-    script_dir = get_script_dir()
+    script_dir = util.get_script_dir(__file__)
     store_price_file = script_dir / "data" / version / "store-prices.json"
     if preset is not None:
         store_price_file = script_dir / "data" / version / "presets" / f"{preset}.json"
