@@ -24,6 +24,7 @@ from textual.widgets import (
     ListView,
 )
 
+import lc_types
 import util
 
 cache_directory = xdg_base_dirs.xdg_cache_home() / "sheet-company"
@@ -233,7 +234,7 @@ class Store(App):
         *args,
         quota: int = 0,
         moon_amount: int = 0,
-        version: str = "v73",
+        version: lc_types.Versions = lc_types.Versions.v73,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -389,7 +390,7 @@ def construct_buy_command_list(buy_list: list[StoreItem]) -> list[StoreItemList]
     return item_bins
 
 
-def run(quota: int, moon_amount: int, version: str) -> int | None:
+def run(quota: int, moon_amount: int, version: lc_types.Versions) -> int | None:
     store = Store(quota=quota, moon_amount=moon_amount, version=version)
     result = store.run()
     return result

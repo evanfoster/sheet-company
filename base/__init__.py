@@ -12,6 +12,7 @@ from lc_types import Versions
 class BaseLCData[T](pydantic.BaseModel, ABC):
     items: dict[str, T] = pydantic.Field(default_factory=dict)
     name_mapping: dict[str, str] = pydantic.Field(default_factory=dict)
+    version: Versions = pydantic.Field(exclude=True)
     wiki_api_uri: typing.ClassVar[str] = "https://lethal.miraheze.org/w/api.php"
 
     @classmethod
@@ -24,7 +25,7 @@ class BaseLCData[T](pydantic.BaseModel, ABC):
 
     @classmethod
     @abstractmethod
-    def parse_wiki_data(cls, data: str) -> typing.Self: ...
+    def parse_wiki_data(cls, data: str, version: Versions) -> typing.Self: ...
 
     def write_model(self, version: Versions):
         version_data_path = self.data_path() / version
@@ -34,13 +35,12 @@ class BaseLCData[T](pydantic.BaseModel, ABC):
 
     @classmethod
     def get_data(cls) -> None:
-        versions = list(Versions.__members__.keys())
         query_parameters = {
             "action": "parse",
             "prop": "wikitext",
             "format": "json".strip(),
         }
-        for version in versions:
+        for version in Versions:
             version = Versions(version)
 
             query_parameters["page"] = f"{cls.wiki_page_base()}/{version}"
@@ -54,13 +54,11 @@ class BaseLCData[T](pydantic.BaseModel, ABC):
             )
             if raw_data is None:
                 raise RuntimeError(f"Failed to get data for version {version}")
-            output_model = cls.parse_wiki_data(raw_data)
+            output_model = cls.parse_wiki_data(raw_data, version)
             output_model.write_model(version)
-
 
     @classmethod
     def get_for_version(cls, version: Versions) -> typing.Self:
-        data = json.loads(
-            (cls.data_path() / "data" / version / "data.json").read_text()
-        )
+        data = json.loads((cls.data_path() / version / "data.json").read_text())
+        data["version"] = version
         return cls(**data)

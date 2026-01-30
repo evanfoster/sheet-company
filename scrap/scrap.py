@@ -21,6 +21,21 @@ class ScrapItem(pydantic.BaseModel):
     is_weapon: bool = pydantic.Field(validation_alias="isWeapon")
     has_battery: bool = pydantic.Field(validation_alias="hasBattery")
 
+    @staticmethod
+    def _divide_value(value) -> int | float:
+        divided = value / 2.5
+        if divided.is_integer():
+            return int(divided)
+        return divided
+
+    @property
+    def min_value(self) -> int | float:
+        return self._divide_value(self.minimum_raw_value)
+
+    @property
+    def max_value(self) -> int | float:
+        return self._divide_value(self.maximum_raw_value)
+
 
 class Scrap(base.BaseLCData[ScrapItem]):
     @classmethod
@@ -32,8 +47,8 @@ class Scrap(base.BaseLCData[ScrapItem]):
         return util.get_script_dir(__file__) / "data"
 
     @classmethod
-    def parse_wiki_data(cls, data: str) -> typing.Self:
-        output_model = cls()
+    def parse_wiki_data(cls, data: str, version: lc_types.Versions) -> typing.Self:
+        output_model = cls(version=version)
         parsed = util.wiki_data_parser(data)
         parsed_data = parsed.get("data")
         if parsed_data is None:

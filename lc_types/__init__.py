@@ -2,6 +2,20 @@ import enum
 import typing
 
 
+class MoonCosts(enum.IntEnum):
+    Experimentation = 0
+    Assurance = 0
+    Vow = 0
+    Offense = 0
+    March = 0
+    Adamance = 0
+    Rend = 550
+    Dine = 600
+    Titan = 700
+    Artifice = 1500
+    Embrion = 150
+
+
 class Versions(enum.StrEnum):
     @staticmethod
     def _generate_next_value_(name, start, count, last_values):
@@ -117,17 +131,17 @@ ItemTypesLiteral = typing.Literal[
 ]
 InfestationTypesLiteral = typing.Literal["nutcracker", "lootbug", ""]
 MoonTypesLiteral = typing.Literal[
-    "experimentation",
-    "assurance",
-    "vow",
-    "offense",
-    "march",
-    "adamance",
-    "rend",
-    "dine",
-    "titan",
-    "artifice",
-    "embrion",
+    "Experimentation",
+    "Assurance",
+    "Vow",
+    "Offense",
+    "March",
+    "Adamance",
+    "Rend",
+    "Dine",
+    "Titan",
+    "Artifice",
+    "Embrion",
     "",
 ]
 WeatherTypesLiteral = typing.Literal[

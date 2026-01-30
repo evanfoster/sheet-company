@@ -98,7 +98,7 @@ class QuotaRollRange(NamedTuple):
 
 
 class Day(pydantic.BaseModel):
-    moon: MoonTypes = "experimentation"
+    moon: MoonTypes = "Experimentation"
     weather: WeatherTypes = "clear"
     item_count: Annotated[
         int, typer.Option(help="The number of items scanned for (excluding bees)")
@@ -192,7 +192,7 @@ class Run(pydantic.BaseModel):
     run_type: RunTypes = "hq"
     moon: MoonTypes = ""
     wiped: bool = False
-    version: str = "v73"
+    version: lc_types.Versions = lc_types.Versions.v73
     players: set[str] = pydantic.Field(default_factory=set)
     target_quota: int = 21
     quota_chance_amount: int = 17000
@@ -727,8 +727,9 @@ def start_run(
     ] = "hq",
     smhq_moon: MoonTypes = "",
     version: Annotated[
-        str, typer.Option(help="The version of Lethal Company being played")
-    ] = "",
+        lc_types.Versions | None,
+        typer.Option(help="The version of Lethal Company being played"),
+    ] = None,
     players: Annotated[
         list[str] | None, typer.Option(help="The players in the current run")
     ] = None,
@@ -787,8 +788,9 @@ def update_run(
         ),
     ] = "",
     version: Annotated[
-        str, typer.Option(help="The version of Lethal Company being played")
-    ] = "",
+        lc_types.Versions | None,
+        typer.Option(help="The version of Lethal Company being played"),
+    ] = None,
     players: Annotated[
         list[str] | None, typer.Option(help="The players in the current run")
     ] = None,

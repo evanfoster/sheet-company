@@ -1,4 +1,3 @@
-import typing
 from pathlib import Path
 
 import xdg_base_dirs
@@ -9,14 +8,14 @@ from pydantic_settings import (
     YamlConfigSettingsSource,
 )
 
+import lc_types
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         yaml_file=xdg_base_dirs.xdg_config_home() / "sheet-company" / "settings.yaml"
     )
-    default_version: typing.Literal[
-        "v40", "v49", "v50", "v56", "v62", "v69", "v72", "v73"
-    ] = "v73"
+    default_version: lc_types.Versions = lc_types.Versions.v73
     default_target_quota: int = 21
     default_quota_chance_amount: int = 17000
     should_write_overlay: bool = False
