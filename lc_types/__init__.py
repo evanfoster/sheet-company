@@ -44,6 +44,7 @@ class Versions(enum.StrEnum):
     v71 = enum.auto()
     v72 = enum.auto()
     v73 = enum.auto()
+    v80 = enum.auto()
 
 
 class Dungeons(enum.IntEnum):
@@ -148,6 +149,6 @@ WeatherTypesLiteral = typing.Literal[
     "clear", "stormy", "rainy", "flooded", "eclipsed", "foggy"
 ]
 LayoutTypesLiteral = typing.Literal["facility", "mansion", "mineshaft", ""]
-RunTypesLiteral = typing.Literal["smhq", "hq"]
+RunTypesLiteral = typing.Literal["smhq", "hq", "10q"]
 
 HazardTypesLiteral = typing.Literal["turret", "landmine", "spike trap"]

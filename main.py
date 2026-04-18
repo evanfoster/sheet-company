@@ -7,6 +7,7 @@ import statistics
 import sys
 import textwrap
 import typing
+import warnings
 from collections.abc import Callable
 from pathlib import Path
 from statistics import StatisticsError
@@ -14,9 +15,12 @@ from typing import Annotated, NamedTuple, get_args
 
 import click
 import iterfzf
-import pydantic
-import pydantic_typer
-import pydantic_yaml
+
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    import pydantic
+    import pydantic_typer
+    import pydantic_yaml
 import typer
 import xdg_base_dirs
 from typer.models import OptionInfo
@@ -116,7 +120,9 @@ class Day(pydantic.BaseModel):
         int, typer.Option(help="The bottom line on the results screen")
     ] = 0
     layout: LayoutTypes = ""
-    meteor_shower: bool = False
+    meteor_shower: Annotated[
+        bool, typer.Option(help="If there was a meteor shower")
+    ] = False
     indoor_fog: bool = False
     infestation: InfestationTypes = ""
     single_item_day: SingleItemDayTypes = ""
