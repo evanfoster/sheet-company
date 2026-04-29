@@ -44,7 +44,7 @@ class Versions(enum.StrEnum):
     v71 = enum.auto()
     v72 = enum.auto()
     v73 = enum.auto()
-    v80 = enum.auto()
+    v81 = enum.auto()
 
 
 class Dungeons(enum.IntEnum):
